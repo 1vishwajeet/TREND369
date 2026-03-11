@@ -1,306 +1,402 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  TrendingUp, Zap, Flame, ChevronRight, Settings, 
-  RefreshCw, X, Database, Type, Layers,
-  Trash2, ShieldCheck, Globe, Image as ImageIcon 
-} from 'lucide-react';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { Flame, TrendingUp, Briefcase, Trophy, Smile, Monitor, Play, Image as ImageIcon, Download, Settings, X, Plus, Type, Layout, ImagePlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// --- DUMMY DATA (No Database required) ---
-const INITIAL_TRENDS = [
-  { id: '1', title: 'AI REPLACES INFLUENCERS', desc: 'Virtual influencers are taking over brand deals globally.', genre: 'tech', hotness: '99%' },
-  { id: '2', title: 'FOUNDER MODE ACTIVATED', desc: 'Tech CEOs are debating the new management style.', genre: 'business', hotness: '94%' },
-  { id: '3', title: 'MARKET HITS ALL TIME HIGH', desc: 'Retail investors are going crazy in the bull run.', genre: 'finance', hotness: '88%' },
+// --- TYPES ---
+type Genre = 'ALL' | 'FINANCE' | 'BUSINESS' | 'SPORTS' | 'FUNNY' | 'TECH';
+type MediaType = 'photo' | 'video';
+
+interface Trend {
+  id: string;
+  title: string;
+  genre: Genre;
+  hotness: number;
+}
+
+interface Template {
+  id: string;
+  type: MediaType;
+  genre: Genre;
+  url: string;
+  bgGradient: string;
+}
+
+// --- DUMMY DATA (Fallback) ---
+const INITIAL_TRENDS: Trend[] = [
+  { id: '1', title: 'Market Crash: Nifty falls 1000 points', genre: 'FINANCE', hotness: 98 },
+  { id: '2', title: 'Startup gets $10M funding at 0 revenue', genre: 'BUSINESS', hotness: 85 },
+  { id: '3', title: 'Last over drama! 6 needed off 1 ball', genre: 'SPORTS', hotness: 95 },
+  { id: '4', title: 'AI takes over coding jobs', genre: 'TECH', hotness: 88 },
+  { id: '5', title: 'Me pretending to work on Friday', genre: 'FUNNY', hotness: 92 },
 ];
 
-const INITIAL_TEMPLATES = [
-  { id: 't1', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop', type: 'photo' },
-  { id: 't2', url: 'https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?q=80&w=2000&auto=format&fit=crop', type: 'photo' },
-  { id: 't3', url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=2000&auto=format&fit=crop', type: 'photo' }
+const INITIAL_TEMPLATES: Template[] = [
+  { id: 't1', type: 'photo', genre: 'FINANCE', url: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800&q=80', bgGradient: 'from-red-900 to-black' },
+  { id: 't2', type: 'photo', genre: 'BUSINESS', url: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&q=80', bgGradient: 'from-gray-900 to-black' },
+  { id: 't3', type: 'photo', genre: 'SPORTS', url: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=800&q=80', bgGradient: 'from-blue-900 to-black' },
 ];
 
-const GENRES = [
-  { id: 'all', label: 'ALL' },
-  { id: 'finance', label: 'FINANCE' },
-  { id: 'business', label: 'BUSINESS' },
-  { id: 'tech', label: 'TECH' },
-  { id: 'funny', label: 'FUNNY' },
+const GENRES: { id: Genre; label: string; icon: React.ReactNode }[] = [
+  { id: 'ALL', label: 'ALL', icon: <Flame className="w-4 h-4" /> },
+  { id: 'FINANCE', label: 'FINANCE', icon: <TrendingUp className="w-4 h-4" /> },
+  { id: 'BUSINESS', label: 'BUSINESS', icon: <Briefcase className="w-4 h-4" /> },
+  { id: 'SPORTS', label: 'SPORTS', icon: <Trophy className="w-4 h-4" /> },
+  { id: 'FUNNY', label: 'FUNNY', icon: <Smile className="w-4 h-4" /> },
+  { id: 'TECH', label: 'TECH', icon: <Monitor className="w-4 h-4" /> },
 ];
 
-const GrainOverlay = () => (
-  <div className="fixed inset-0 pointer-events-none z-50 opacity-[0.04] bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-repeat"></div>
-);
+export default function App() {
+  const [activeGenre, setActiveGenre] = useState<Genre>('ALL');
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  
+  // Studio States
+  const [memeText, setMemeText] = useState('ENTER YOUR TEXT HERE');
+  const [aspectRatio, setAspectRatio] = useState<'9:16' | '1:1' | '16:9'>('1:1');
+  const [showWatermark, setShowWatermark] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-// --- ADMIN PANEL ---
-const AdminPanel = ({ trends, setTrends, templates, setTemplates, setView }) => {
-  const [activeMode, setActiveMode] = useState('add');
-  const [activeTab, setActiveTab] = useState('trend');
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ title: '', genre: 'funny', desc: '', hotness: '95%', url: '', type: 'photo' });
+  // Data States
+  const [trends, setTrends] = useState<Trend[]>(INITIAL_TRENDS);
+  const [templates, setTemplates] = useState<Template[]>(INITIAL_TEMPLATES);
 
-  const syncReddit = () => {
-    setLoading(true);
+  // Load from LocalStorage
+  useEffect(() => {
+    const savedTrends = localStorage.getItem('trendlab_trends');
+    const savedTemplates = localStorage.getItem('trendlab_templates');
+    if (savedTrends) setTrends(JSON.parse(savedTrends));
+    if (savedTemplates) setTemplates(JSON.parse(savedTemplates));
+  }, []);
+
+  const filteredTrends = activeGenre === 'ALL' ? trends : trends.filter(t => t.genre === activeGenre);
+  const filteredTemplates = activeGenre === 'ALL' ? templates : templates.filter(t => t.genre === activeGenre);
+
+  const handleDownload = () => {
+    setIsGenerating(true);
     setTimeout(() => {
-      const newTrend = {
-        id: Math.random().toString(),
-        title: 'NEW REDDIT VIRAL TOPIC ' + Math.floor(Math.random() * 100),
-        desc: 'Scraped successfully from the frontpage of the internet.',
-        genre: 'funny',
-        hotness: '90%'
-      };
-      setTrends([newTrend, ...trends]);
-      setLoading(false);
+      setIsGenerating(false);
+      alert('Meme Downloaded! (Simulated)');
     }, 1500);
   };
 
-  const handleAdd = (e: any) => {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      if (activeTab === 'trend') {
-        setTrends([{ id: Math.random().toString(), ...formData, title: formData.title.toUpperCase() }, ...trends]);
-        setView('radar');
-      } else {
-        setTemplates([{ id: Math.random().toString(), url: formData.url, type: formData.type }, ...templates]);
-      }
-      setFormData({ title: '', genre: 'funny', desc: '', hotness: '95%', url: '', type: 'photo' });
-      setLoading(false);
-    }, 800);
-  };
-
-  const handleDelete = (type: string, id: string) => {
-    if (type === 'trends') setTrends(trends.filter((t: any) => t.id !== id));
-    if (type === 'templates') setTemplates(templates.filter((t: any) => t.id !== id));
-  };
-
   return (
-    <div className="pt-28 pb-20 px-6 max-w-4xl mx-auto min-h-screen">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
-        <div>
-          <h2 className="text-4xl font-black italic text-red-600 tracking-tighter uppercase flex items-center gap-3">
-            <ShieldCheck size={32} /> Lab Controller
-          </h2>
-          <p className="text-zinc-500 text-[10px] font-bold tracking-[0.3em] uppercase mt-2">Local Mode (No DB) // UID: ADMIN_001</p>
-        </div>
-        <div className="flex gap-2 bg-zinc-900 p-1 rounded-2xl border border-zinc-800 shadow-xl">
-          <button onClick={() => setActiveMode('add')} className={`px-6 py-3 rounded-xl text-[10px] font-black transition-all ${activeMode === 'add' ? 'bg-red-600 text-white' : 'text-zinc-500 hover:text-white'}`}>CREATE</button>
-          <button onClick={() => setActiveMode('manage')} className={`px-6 py-3 rounded-xl text-[10px] font-black transition-all ${activeMode === 'manage' ? 'bg-red-600 text-white' : 'text-zinc-500 hover:text-white'}`}>MANAGE</button>
-          <button onClick={() => setView('radar')} className="p-3 bg-black text-zinc-500 rounded-xl hover:text-white transition-colors"><X size={18} /></button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-black text-white font-sans selection:bg-red-500/30">
+      {/* Background Effects */}
+      <div className="fixed inset-0 z-0 opacity-20 pointer-events-none bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-black to-black" />
+      <div className="fixed inset-0 z-0 opacity-[0.03] pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
 
-      {activeMode === 'add' ? (
-        <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button onClick={syncReddit} disabled={loading} className="p-8 bg-zinc-900 border border-zinc-800 rounded-[2.5rem] flex flex-col items-center justify-center space-y-4 hover:border-red-600 transition-all group">
-              <Globe className={`w-8 h-8 text-red-600 ${loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-700'}`} />
-              <div className="text-center">
-                <span className="block font-black text-xs tracking-widest uppercase">Mock Sync</span>
-                <span className="text-[9px] text-zinc-500 uppercase mt-1">Generate Dummy Trend</span>
-              </div>
-            </button>
-            <div className="p-8 bg-zinc-900/40 border border-zinc-800 rounded-[2.5rem] flex items-center justify-center gap-4">
-               <div className={`p-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'trend' ? 'bg-red-600' : 'bg-black text-zinc-600 hover:text-white'}`} onClick={() => setActiveTab('trend')}><Zap size={24} /></div>
-               <div className={`p-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'template' ? 'bg-red-600' : 'bg-black text-zinc-600 hover:text-white'}`} onClick={() => setActiveTab('template')}><ImageIcon size={24} /></div>
-            </div>
+      {/* Navbar */}
+      <nav className="fixed top-0 w-full z-50 border-b border-red-900/30 bg-black/50 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className="w-6 h-6 text-red-500 animate-pulse" />
+            <span className="text-xl font-bold tracking-wider">THE TREND LAB</span>
           </div>
-
-          <form onSubmit={handleAdd} className="bg-zinc-900/40 border border-zinc-800 p-10 rounded-[3rem] shadow-2xl space-y-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Headline</label>
-              <input required placeholder="ENTER HOOK..." value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black border border-zinc-800 p-6 rounded-2xl outline-none focus:border-red-600 text-xl font-black uppercase text-white" />
-            </div>
-            {activeTab === 'trend' ? 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Context</label>
-                <textarea placeholder="Briefly describe..." value={formData.desc} onChange={e => setFormData({...formData, desc: e.target.value})} className="w-full bg-black border border-zinc-800 p-6 rounded-2xl h-32 resize-none outline-none focus:border-red-600 font-medium text-sm text-zinc-400" />
-              </div> :
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Media URL</label>
-                <input placeholder="Paste Image link..." value={formData.url} onChange={e => setFormData({...formData, url: e.target.value})} className="w-full bg-black border border-zinc-800 p-6 rounded-2xl outline-none focus:border-red-600 text-white" />
-              </div>
-            }
-            <button disabled={loading} className="w-full py-8 bg-red-600 text-white font-black text-2xl rounded-3xl hover:bg-red-700 shadow-2xl active:scale-[0.98] transition-all disabled:opacity-50 uppercase tracking-tighter italic">
-              {loading ? "Forging..." : `Deploy ${activeTab}`}
-            </button>
-          </form>
-        </div>
-      ) : (
-        <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-           <div className="space-y-6">
-              <h3 className="text-xs font-black uppercase tracking-[0.4em] text-zinc-600 flex items-center gap-2"><Database size={14} /> Repository (Local)</h3>
-              <div className="grid gap-4">
-                {trends.map((t: any) => (
-                  <div key={t.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl flex justify-between items-center group hover:border-red-600/50 transition-all">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-black rounded-lg text-red-600"><Zap size={16} /></div>
-                      <div>
-                        <p className="font-black text-sm uppercase tracking-tight text-white">{t.title}</p>
-                        <p className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest mt-1">{t.genre} // {t.hotness}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => handleDelete('trends', t.id)} className="p-3 text-zinc-600 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={18} /></button>
-                  </div>
-                ))}
-              </div>
-           </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// --- MAIN APP ---
-const App = () => {
-  const [view, setView] = useState('landing');
-  const [trends, setTrends] = useState(INITIAL_TRENDS);
-  const [templates, setTemplates] = useState(INITIAL_TEMPLATES);
-  const [selectedGenre, setSelectedGenre] = useState('all');
-  const [activeTrend, setActiveTrend] = useState<any>(null);
-  const [activeTemplate, setActiveTemplate] = useState<any>(INITIAL_TEMPLATES[0]);
-  const [memeText, setMemeText] = useState('VIRAL HOOK');
-  const [aspectRatio, setAspectRatio] = useState('9:16');
-
-  const filteredTrends = useMemo(() => {
-    return selectedGenre === 'all' ? trends : trends.filter(t => t.genre === selectedGenre);
-  }, [trends, selectedGenre]);
-
-  return (
-    <div className="bg-black text-white min-h-screen selection:bg-red-600 font-sans tracking-tight overflow-x-hidden">
-      <GrainOverlay />
-      
-      <nav className="fixed top-0 w-full z-50 border-b border-zinc-900 bg-black/80 backdrop-blur-2xl px-8 py-5 flex justify-between items-center shadow-2xl">
-        <div onClick={() => setView('landing')} className="flex items-center space-x-3 cursor-pointer group">
-          <div className="p-2 bg-red-600 rounded-xl group-hover:rotate-12 transition-transform shadow-lg shadow-red-900/20"><TrendingUp className="text-white w-5 h-5" /></div>
-          <span className="font-black text-2xl tracking-tighter italic">THE TREND LAB</span>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="hidden md:flex flex-col items-end opacity-40">
-             <span className="text-[8px] font-black uppercase tracking-tighter">NODE: OFFLINE UI</span>
-          </div>
-          <button onClick={() => setView('admin')} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl hover:text-red-600 transition-all active:scale-90 shadow-xl shadow-black/50 hover:bg-zinc-800"><Settings className="w-5 h-5" /></button>
+          <button 
+            onClick={() => setIsAdminOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-red-950/30 hover:bg-red-900/50 border border-red-900/50 rounded-md transition-all text-sm font-medium"
+          >
+            <Settings className="w-4 h-4" />
+            ADMIN
+          </button>
         </div>
       </nav>
 
-      <AnimatePresence mode="wait">
-        {view === 'landing' && (
-          <motion.div key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-red-600/5 blur-[160px] rounded-full animate-pulse"></div>
-            <div className="relative z-10">
-              <motion.h1 initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="text-7xl md:text-[11rem] font-black mb-12 tracking-tighter leading-[0.75] uppercase italic">
-                Mining<br/><span className="text-red-600 not-italic">Attention.</span>
-              </motion.h1>
-              <p className="text-zinc-600 font-bold mb-16 tracking-[0.4em] text-[10px] uppercase max-w-lg mx-auto">Extract viral patterns. Build content weapons. Dominate the feed.</p>
-              <button onClick={() => setView('radar')} className="group relative px-20 py-8 bg-red-600 text-white font-black text-2xl rounded-2xl shadow-[0_30px_60px_-15px_rgba(220,38,38,0.3)] active:scale-95 transition-all overflow-hidden">
-                <span className="relative z-10">INITIATE RADAR</span>
-                <div className="absolute inset-0 bg-white/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 italic"></div>
+      <main className="relative z-10 pt-24 pb-20 px-6 max-w-7xl mx-auto space-y-20">
+        
+        {/* HERO SECTION */}
+        <section className="text-center py-20 space-y-6">
+          <motion.h1 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-5xl md:text-7xl font-black tracking-tighter"
+          >
+            STOP ADVERTISING.<br/>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-red-800 animate-pulse">
+              START TRENDING.
+            </span>
+          </motion.h1>
+          <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+            We track the internet's pulse. You take the credit. Select a trend, pick a template, and deploy viral content in 60 seconds.
+          </p>
+        </section>
+
+        {/* RADAR (GENRES) */}
+        <section className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <h2 className="text-2xl font-bold tracking-wide">THE RADAR</h2>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {GENRES.map((g) => (
+              <button
+                key={g.id}
+                onClick={() => setActiveGenre(g.id)}
+                className={`flex items-center gap-2 px-5 py-3 rounded-full border transition-all ${
+                  activeGenre === g.id 
+                  ? 'border-red-500 bg-red-500/10 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]' 
+                  : 'border-white/10 text-gray-400 hover:border-white/30'
+                }`}
+              >
+                {g.icon}
+                <span className="text-sm font-bold tracking-wider">{g.label}</span>
               </button>
-            </div>
-          </motion.div>
-        )}
+            ))}
+          </div>
+        </section>
 
-        {view === 'radar' && (
-          <motion.div key="r" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="pt-32 pb-20 px-8 max-w-7xl mx-auto">
-            <div className="flex flex-col md:flex-row justify-between items-end mb-20 gap-8">
-              <div className="space-y-4">
-                <h2 className="text-6xl md:text-8xl font-black italic tracking-tighter uppercase leading-none">RADAR FEED</h2>
-                <div className="flex items-center text-red-600 gap-3">
-                  <div className="w-3 h-3 bg-red-600 rounded-full animate-ping"></div>
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em]">Live UI Demo</span>
+        {/* TRENDING CARDS (BENTO) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredTrends.map((trend) => (
+            <motion.div 
+              key={trend.id}
+              layout
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="p-6 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm hover:border-red-500/50 transition-colors group cursor-pointer"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-xs font-bold text-red-500 tracking-wider bg-red-500/10 px-2 py-1 rounded">
+                  {trend.genre}
+                </span>
+                <div className="flex items-center gap-1 text-xs text-orange-400">
+                  <Flame className="w-3 h-3" />
+                  {trend.hotness}% HOT
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap bg-zinc-900/50 p-1.5 rounded-2xl border border-zinc-800 backdrop-blur-xl">
-                {GENRES.map(g => (
-                  <button key={g.id} onClick={() => setSelectedGenre(g.id)} className={`px-6 py-3 text-[10px] font-black rounded-xl transition-all ${selectedGenre === g.id ? 'bg-red-600 text-white shadow-xl' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'}`}>{g.label}</button>
-                ))}
-              </div>
+              <h3 className="text-xl font-bold mb-6 group-hover:text-red-400 transition-colors">
+                {trend.title}
+              </h3>
+              <button className="w-full py-3 bg-white/10 hover:bg-red-600 transition-colors rounded-md font-bold text-sm tracking-widest">
+                MEME-IFY THIS
+              </button>
+            </motion.div>
+          ))}
+          {filteredTrends.length === 0 && (
+            <div className="col-span-full py-10 text-center text-gray-500 border border-dashed border-white/10 rounded-xl">
+              No trends found for this category.
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredTrends.map((t: any) => (
-                <div key={t.id} onClick={() => {setActiveTrend(t); setMemeText(t.title); setView('editor')}} className="bg-zinc-900/30 border border-zinc-800/50 p-10 rounded-[3rem] cursor-pointer hover:border-red-600/50 hover:bg-zinc-900/60 transition-all group relative overflow-hidden flex flex-col justify-between min-h-[340px] shadow-xl">
-                  <div className="flex justify-between items-start mb-10">
-                    <span className="text-[9px] font-black uppercase text-zinc-500 bg-black px-4 py-2 rounded-full border border-zinc-800 tracking-widest">{t.genre}</span>
-                    <div className="flex items-center text-red-600 gap-1 font-black text-xs"><Flame size={14} className="animate-pulse" /> {t.hotness}</div>
-                  </div>
-                  <div>
-                    <h3 className="text-3xl font-black mb-4 group-hover:text-red-500 transition-colors uppercase italic leading-[0.9] tracking-tighter">{t.title}</h3>
-                    <p className="text-zinc-500 text-sm line-clamp-3 font-medium leading-relaxed mb-8">{t.desc}</p>
-                  </div>
-                  <div className="text-[10px] font-black uppercase tracking-[0.3em] flex items-center group-hover:text-red-500 transition-colors pt-6 border-t border-zinc-800/50">
-                    Capture Node <ChevronRight className="ml-auto w-4 h-4 group-hover:translate-x-2 transition-transform" />
+          )}
+        </div>
+
+        {/* TEMPLATE GALLERY */}
+        <section className="space-y-6">
+          <h2 className="text-2xl font-bold tracking-wide flex items-center gap-3">
+            <ImageIcon className="text-red-500" />
+            THE ARMORY (TEMPLATES)
+          </h2>
+          <div className="flex overflow-x-auto pb-8 gap-6 scrollbar-hide">
+            {filteredTemplates.map((template) => (
+              <div 
+                key={template.id}
+                onClick={() => setSelectedTemplate(template)}
+                className={`flex-none w-64 md:w-80 group cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${
+                  selectedTemplate?.id === template.id ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-white/10'
+                }`}
+              >
+                <div className="relative aspect-video bg-gray-900">
+                  <img src={template.url} alt="template" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute top-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                    {template.type === 'video' ? <Play className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                    {template.type.toUpperCase()}
                   </div>
                 </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-
-        {view === 'editor' && (
-          <motion.div key="e" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="pt-24 px-8 max-w-[1700px] mx-auto flex flex-col xl:flex-row gap-16 pb-20">
-            <button onClick={() => setView('radar')} className="fixed top-24 left-10 text-zinc-500 hover:text-white flex items-center z-50 group font-black text-[10px] tracking-[0.2em] bg-zinc-900/80 backdrop-blur-xl px-6 py-3 rounded-2xl border border-zinc-800 shadow-xl transition-all"><X className="mr-3 w-4 h-4 group-hover:rotate-90 transition-transform" /> CANCEL OPERATION</button>
-            
-            <div className="w-full xl:w-[450px] flex flex-col">
-              <div className="flex items-center gap-4 mb-10">
-                <div className="p-3 bg-red-600 rounded-xl shadow-lg shadow-red-900/20"><Layers size={20} /></div>
-                <h3 className="text-3xl font-black italic tracking-tighter uppercase leading-none text-white">Asset Pool</h3>
               </div>
-              <div className="grid grid-cols-2 gap-4 overflow-y-auto pr-4 custom-scrollbar max-h-[700px]">
-                {templates.map((t: any) => (
-                  <div key={t.id} onClick={() => setActiveTemplate(t)} className={`aspect-[3/4] rounded-[2rem] overflow-hidden border-4 cursor-pointer relative group transition-all duration-500 ${activeTemplate?.id === t.id ? 'border-red-600 scale-[0.98] shadow-2xl shadow-red-900/20' : 'border-zinc-900 hover:border-zinc-800'}`}>
-                    <img src={t.url} className="w-full h-full object-cover transition-transform duration-[1.5s] group-hover:scale-125" alt="Node Asset" />
+            ))}
+          </div>
+        </section>
+
+        {/* MINI STUDIO (EDITOR) */}
+        <AnimatePresence>
+          {selectedTemplate && (
+            <motion.section 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="border border-red-500/30 rounded-2xl bg-black/80 p-6 md:p-10 shadow-[0_0_50px_rgba(239,68,68,0.1)]"
+            >
+              <div className="flex items-center justify-between mb-8 border-b border-white/10 pb-4">
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                  <Layout className="text-red-500" />
+                  THE STUDIO
+                </h2>
+                <button onClick={() => setSelectedTemplate(null)} className="text-gray-400 hover:text-white">
+                  <X />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                {/* Canvas Preview */}
+                <div className="bg-gray-900 rounded-xl flex items-center justify-center p-8 border border-white/5">
+                  <div 
+                    className={`relative overflow-hidden bg-gradient-to-br ${selectedTemplate.bgGradient} transition-all duration-300`}
+                    style={{
+                      width: aspectRatio === '1:1' ? '100%' : aspectRatio === '9:16' ? '60%' : '100%',
+                      aspectRatio: aspectRatio === '1:1' ? '1/1' : aspectRatio === '9:16' ? '9/16' : '16/9'
+                    }}
+                  >
+                    <img src={selectedTemplate.url} alt="bg" className="absolute inset-0 w-full h-full object-cover mix-blend-overlay opacity-50" />
+                    <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+                      <h3 className="text-3xl md:text-5xl font-black text-white uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] leading-tight">
+                        {memeText}
+                      </h3>
+                    </div>
+                    {showWatermark && (
+                      <div className="absolute bottom-4 right-4 text-[10px] font-bold tracking-widest text-white/50">
+                        @THETRENDLAB
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex-1 flex flex-col items-center justify-center bg-zinc-950 border border-zinc-900 rounded-[4rem] min-h-[700px] relative shadow-inner p-12 overflow-hidden">
-              <div className="absolute top-8 left-1/2 -translate-x-1/2 flex gap-4 bg-black/60 p-1.5 rounded-2xl border border-zinc-800 z-20 backdrop-blur-md">
-                <button onClick={() => setAspectRatio('9:16')} className={`px-6 py-2.5 text-[9px] font-black rounded-xl transition-all ${aspectRatio === '9:16' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}>9:16 VERTICAL</button>
-                <button onClick={() => setAspectRatio('1:1')} className={`px-6 py-2.5 text-[9px] font-black rounded-xl transition-all ${aspectRatio === '1:1' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}>1:1 SQUARE</button>
-              </div>
-
-              <motion.div layout className={`relative bg-zinc-900 border-[14px] border-white shadow-[0_80px_160px_-40px_rgba(0,0,0,1)] overflow-hidden transition-all duration-700 mx-auto rounded-[2.5rem] ${aspectRatio === '9:16' ? 'w-[360px] h-[640px]' : 'w-[540px] h-[540px]'}`}>
-                {activeTemplate && <img src={activeTemplate.url} className="absolute inset-0 w-full h-full object-cover brightness-[0.4] contrast-[1.1] saturate-[1.2]" alt="Active Canvas" />}
-                <div className="absolute inset-0 p-14 flex flex-col justify-between z-10 text-white font-black uppercase italic">
-                  <div className="flex justify-between items-start text-[10px] tracking-[0.3em] opacity-40">
-                    <span>NODE_{activeTrend?.genre || 'X'}</span><Zap className="w-5 h-5 text-red-600 fill-red-600" />
-                  </div>
-                  <p className="text-[3.2rem] leading-[0.8] tracking-tighter drop-shadow-[0_20px_20px_rgba(0,0,0,1)] uppercase break-words">{memeText}</p>
                 </div>
-              </motion.div>
-            </div>
 
-            <div className="w-full xl:w-[420px] flex flex-col space-y-10 pt-12">
-              <div className="space-y-4">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center"><Type className="w-4 h-4 mr-3 text-red-600" /> Edit Mutation</label>
-                <textarea 
-                  value={memeText} 
-                  onChange={(e) => setMemeText(e.target.value.toUpperCase())} 
-                  className="w-full bg-zinc-900/50 border border-zinc-800 p-10 text-white font-black text-4xl h-72 rounded-[3.5rem] outline-none focus:border-red-600 resize-none shadow-2xl transition-all tracking-tighter leading-none shadow-black" 
-                />
+                {/* Controls */}
+                <div className="space-y-8">
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold tracking-wider text-gray-400 flex items-center gap-2">
+                      <Type className="w-4 h-4" /> IMPACT TEXT
+                    </label>
+                    <textarea 
+                      value={memeText}
+                      onChange={(e) => setMemeText(e.target.value)}
+                      className="w-full bg-black border border-white/20 rounded-lg p-4 text-xl font-bold focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 transition-all resize-none h-32 uppercase"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-3">
+                      <label className="text-xs font-bold tracking-wider text-gray-400">FORMAT</label>
+                      <select 
+                        value={aspectRatio}
+                        onChange={(e) => setAspectRatio(e.target.value as any)}
+                        className="w-full bg-black border border-white/20 rounded-lg p-3 focus:border-red-500 focus:outline-none text-sm"
+                      >
+                        <option value="1:1">Instagram Post (1:1)</option>
+                        <option value="9:16">Reels / Shorts (9:16)</option>
+                        <option value="16:9">YouTube / Twitter (16:9)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-3 flex flex-col justify-end">
+                      <button 
+                        onClick={() => setShowWatermark(!showWatermark)}
+                        className={`p-3 rounded-lg border text-sm font-bold transition-all ${
+                          showWatermark ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-white/20 text-gray-400'
+                        }`}
+                      >
+                        {showWatermark ? 'WATERMARK ON' : 'WATERMARK OFF'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleDownload}
+                    disabled={isGenerating}
+                    className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-black tracking-widest text-lg rounded-lg transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                  >
+                    {isGenerating ? (
+                      <span className="animate-pulse">RENDERING...</span>
+                    ) : (
+                      <>
+                        <Download className="w-5 h-5" />
+                        GENERATE & STRIKE
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-              <div className="space-y-4">
-                 <button className="w-full py-10 bg-red-600 text-white font-black text-2xl rounded-[3.5rem] shadow-[0_30px_70px_-15px_rgba(220,38,38,0.3)] active:scale-95 transition-all hover:bg-red-700 flex items-center justify-center gap-4 group">
-                    FORGE ASSET <ChevronRight className="group-hover:translate-x-2 transition-transform" />
-                 </button>
-                 <p className="text-center text-[9px] font-bold text-zinc-600 uppercase tracking-widest italic">Mock Deployment Mode</p>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+      </main>
+
+      {/* ADMIN MODAL (LOCALSTORAGE) */}
+      <AnimatePresence>
+        {isAdminOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-gray-950 border border-white/10 rounded-2xl w-full max-w-2xl p-6 md:p-8 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Settings className="text-red-500" /> ADMIN TERMINAL
+                </h2>
+                <button onClick={() => setIsAdminOpen(false)} className="text-gray-400 hover:text-white">
+                  <X />
+                </button>
               </div>
-            </div>
-          </motion.div>
+
+              <div className="space-y-8 text-sm">
+                <p className="text-yellow-500 bg-yellow-500/10 p-4 rounded-lg border border-yellow-500/20">
+                  Data is saved in your browser (LocalStorage). Safe for Vercel deployment!
+                </p>
+
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-red-400 border-l-4 border-red-500 pl-3">Add New Trend</h3>
+                  <div className="flex gap-2">
+                    <input id="trendTitle" placeholder="Trend Headline..." className="flex-1 bg-black border border-white/20 rounded p-3 text-white" />
+                    <select id="trendGenre" className="bg-black border border-white/20 rounded p-3 text-white">
+                      {GENRES.filter(g => g.id !== 'ALL').map(g => (
+                        <option key={g.id} value={g.id}>{g.label}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                        const title = (document.getElementById('trendTitle') as HTMLInputElement).value;
+                        const genre = (document.getElementById('trendGenre') as HTMLSelectElement).value as Genre;
+                        if(title) {
+                          const newTrend: Trend = { id: Date.now().toString(), title, genre, hotness: Math.floor(Math.random() * 20 + 80) };
+                          const updated = [newTrend, ...trends];
+                          setTrends(updated);
+                          localStorage.setItem('trendlab_trends', JSON.stringify(updated));
+                          (document.getElementById('trendTitle') as HTMLInputElement).value = '';
+                          alert('Trend Added!');
+                        }
+                      }}
+                      className="bg-white text-black font-bold px-4 py-2 rounded"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="font-bold text-lg text-red-400 border-l-4 border-red-500 pl-3">Add Template Image URL</h3>
+                  <div className="flex gap-2 flex-wrap">
+                    <input id="tempUrl" placeholder="Image URL (Unsplash/Imgur)..." className="flex-1 bg-black border border-white/20 rounded p-3 text-white min-w-[200px]" />
+                    <select id="tempGenre" className="bg-black border border-white/20 rounded p-3 text-white">
+                      {GENRES.filter(g => g.id !== 'ALL').map(g => (
+                        <option key={g.id} value={g.id}>{g.label}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                        const url = (document.getElementById('tempUrl') as HTMLInputElement).value;
+                        const genre = (document.getElementById('tempGenre') as HTMLSelectElement).value as Genre;
+                        if(url) {
+                          const newTemp: Template = { id: Date.now().toString(), type: 'photo', genre, url, bgGradient: 'from-gray-900 to-black' };
+                          const updated = [newTemp, ...templates];
+                          setTemplates(updated);
+                          localStorage.setItem('trendlab_templates', JSON.stringify(updated));
+                          (document.getElementById('tempUrl') as HTMLInputElement).value = '';
+                          alert('Template Added!');
+                        }
+                      }}
+                      className="bg-white text-black font-bold px-4 py-2 rounded"
+                    >
+                      ADD
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          </div>
         )}
-
-        {view === 'admin' && <AdminPanel trends={trends} setTrends={setTrends} templates={templates} setTemplates={setTemplates} setView={setView} />}
       </AnimatePresence>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #18181b; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #ef4444; }
-        body { background-color: black; cursor: crosshair; overflow-y: auto; }
-      `}</style>
     </div>
   );
-};
-
-export default App;
+}
